@@ -28,3 +28,6 @@ MonoBehaviour:
   enabled:
     overrideState: 1
     value: 1
+  _Range:
+    overrideState: 0
+    value: 0.01
