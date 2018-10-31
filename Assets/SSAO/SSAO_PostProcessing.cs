@@ -12,6 +12,7 @@ public sealed class SSAO_PostProcessing : PostProcessEffectSettings
     public FloatParameter _Range = new FloatParameter { value = 0.1f };
 }
 
+[ExecuteInEditMode]
 public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 {
 
@@ -25,13 +26,30 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
     {
         var shader = Shader.Find("Hidden/SSAO");
         _material = new Material(shader);
+        var random = new System.Random();
          
+        _randomTexture = new Texture2D(256, 256, TextureFormat.RGBAHalf, false, true);
+        for (int x = 0; x < 256; ++x)
+        {
+            var rand = new Vector3();
+            for (int y = 0; y < 256; ++y)
+            {
+                rand.Set(
+                    (float)random.NextDouble() * 2f - 1f,
+                    (float)random.NextDouble()* 2f - 1f,
+                    (float)random.NextDouble() * 2f - 1f);
 
-        _randomTexture = new Texture2D(128, 128, TextureFormat.RGB24, false, true);
-        for (int x = 0; x < 128; ++x)
-            for (int y = 0; y < 128; ++y)
-                _randomTexture.SetPixel(x, y, UnityEngine.Random.ColorHSV());
+                rand.Normalize();
 
+                _randomTexture.SetPixel(x, y, new Color
+                {
+                    r = rand.x,
+                    g = rand.y,
+                    b = rand.z,
+                    a = 1
+                });
+            }
+        }
         _randomTexture.Apply(); 
 
         UpdateMaterialProperties();
@@ -75,7 +93,11 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 
         _material.SetTexture(Shader.PropertyToID("_RandomTex"), _randomTexture); 
         _material.SetMatrix("projToView", view);
-        _material.SetMatrix("viewToWorld", viewToWorld); 
+        _material.SetMatrix("viewToProj", view.inverse);
+        _material.SetMatrix("viewToWorld", viewToWorld);
+        _material.SetMatrix("worldToView", viewToWorld.inverse);
+         
+
         _material.SetFloat("_Range", settings._Range.value);
    
         cmd.Blit(ctx.source, ctx.destination, _material);
