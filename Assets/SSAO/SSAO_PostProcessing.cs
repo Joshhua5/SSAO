@@ -10,6 +10,9 @@ public sealed class SSAO_PostProcessing : PostProcessEffectSettings
 {
     [Range(0.01f, 2)]
     public FloatParameter _Range = new FloatParameter { value = 0.1f };
+
+    [Range(0.5f, 10)]
+    public FloatParameter _Intensity = new FloatParameter { value = 1f };
 }
 
 [ExecuteInEditMode]
@@ -21,6 +24,7 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
  
     private Material _material;
     private Texture2D _randomTexture;
+    private Texture2D _occlusionFunction;
       
     public override void Init()
     {
@@ -50,7 +54,16 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
                 });
             }
         }
-        _randomTexture.Apply(); 
+        _randomTexture.Apply();
+
+        _occlusionFunction = new Texture2D(32, 1, TextureFormat.RHalf, false, true);
+        _occlusionFunction.SetPixel(0, 0, Color.black);
+        for(int x = 0; x < 31; ++x)
+        {
+            // Linear function
+            _occlusionFunction.SetPixel(1 + x, 0, new Color(1f - (x / 31f), 0, 0));
+        }
+        _occlusionFunction.Apply();
 
         UpdateMaterialProperties();
         base.Init();
@@ -91,13 +104,15 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
         var view = GL.GetGPUProjectionMatrix(ctx.camera.projectionMatrix, false).inverse; 
         var viewToWorld = ctx.camera.cameraToWorldMatrix;
 
-        _material.SetTexture(Shader.PropertyToID("_RandomTex"), _randomTexture); 
+        _material.SetTexture("_RandomTex", _randomTexture);
+        _material.SetTexture("_OcclusionFunction", _occlusionFunction);
+
         _material.SetMatrix("projToView", view);
         _material.SetMatrix("viewToProj", view.inverse);
         _material.SetMatrix("viewToWorld", viewToWorld);
         _material.SetMatrix("worldToView", viewToWorld.inverse);
-         
 
+        _material.SetFloat("_Intensity", settings._Intensity.value);
         _material.SetFloat("_Range", settings._Range.value);
    
         cmd.Blit(ctx.source, ctx.destination, _material);
