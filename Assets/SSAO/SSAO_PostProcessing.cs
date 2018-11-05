@@ -71,20 +71,6 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 
     public void UpdateMaterialProperties()
     { 
-        /*
-        _material.SetFloat("_Threshold", settings.threshold);
-        _material.SetInt("_Samples", settings.samples);
-        _material.SetFloat("_Radius", settings.radius);
-        _material.SetFloat("_Intensity", settings.intensity);
-        _material.SetFloat("_LumaProtect", 1f - settings.lumaProtect);
-        _material.SetFloat("_BlurSpread", Mathf.Max(settings.radius / 16f, 1f));
-        _material.SetVector("_Direction", settings.direction.value.normalized);
-
-        if (settings.blur)
-            _material.EnableKeyword(SKW_BLUR); 
-        else
-            _material.DisableKeyword(SKW_BLUR); 
-        */
     }
 
     public override void Release()
@@ -101,17 +87,18 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
   
         // https://forum.unity.com/threads/solved-clip-space-to-world-space-in-a-vertex-shader.531492/
         // We use chriscummings solution for depth to worldspace
-        var view = GL.GetGPUProjectionMatrix(ctx.camera.projectionMatrix, false).inverse; 
+        var viewToClip = ctx.camera.projectionMatrix;
         var viewToWorld = ctx.camera.cameraToWorldMatrix;
+        var worldToView = ctx.camera.worldToCameraMatrix;
 
         _material.SetTexture("_RandomTex", _randomTexture);
         _material.SetTexture("_OcclusionFunction", _occlusionFunction);
-
-        _material.SetMatrix("projToView", view);
-        _material.SetMatrix("viewToProj", view.inverse);
+         
+        _material.SetMatrix("viewToClip", viewToClip);
+        _material.SetMatrix("clipToView", viewToClip.inverse);
         _material.SetMatrix("viewToWorld", viewToWorld);
-        _material.SetMatrix("worldToView", viewToWorld.inverse);
-
+        _material.SetMatrix("worldToView", worldToView);
+        
         _material.SetFloat("_Intensity", settings._Intensity.value);
         _material.SetFloat("_Range", settings._Range.value);
    
