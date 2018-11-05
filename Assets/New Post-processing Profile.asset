@@ -29,12 +29,21 @@ MonoBehaviour:
   enabled:
     overrideState: 1
     value: 1
-  _Range:
+  Range:
     overrideState: 1
-    value: 0.2
-  _Intensity:
+    value: 0.25
+  Intensity:
     overrideState: 1
-    value: 0.6
+    value: 1.01
+  Samples:
+    overrideState: 0
+    value: 32
+  DropOff:
+    overrideState: 0
+    value: 3
+  Blur:
+    overrideState: 1
+    value: 1
 --- !u!114 &114882800372297530
 MonoBehaviour:
   m_ObjectHideFlags: 3

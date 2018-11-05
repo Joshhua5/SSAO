@@ -9,10 +9,18 @@ using UnityEngine.Experimental.Rendering;
 public sealed class SSAO_PostProcessing : PostProcessEffectSettings
 {
     [Range(0.01f, 2)]
-    public FloatParameter _Range = new FloatParameter { value = 0.1f };
+    public FloatParameter Range = new FloatParameter { value = 0.2f };
 
     [Range(0.5f, 10)]
-    public FloatParameter _Intensity = new FloatParameter { value = 1f };
+    public FloatParameter Intensity = new FloatParameter { value = 0.6f };
+     
+    [Range(1, 64)]
+    public IntParameter Samples = new IntParameter { value = 32 };
+
+    [Range(1, 10)]
+    public IntParameter DropOff = new IntParameter { value = 3 };
+
+    public BoolParameter Blur = new BoolParameter { value = true };
 }
 
 [ExecuteInEditMode]
@@ -80,13 +88,24 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 
     public override void Render(PostProcessRenderContext ctx)
     {
-        //UpdateMaterialProperties();
         var cmd = ctx.command;  
 
         cmd.BeginSample("Custom SSAO"); 
   
-        // https://forum.unity.com/threads/solved-clip-space-to-world-space-in-a-vertex-shader.531492/
-        // We use chriscummings solution for depth to worldspace
+        var descriptor = new RenderTextureDescriptor
+        {
+            width = ctx.camera.pixelWidth,
+            height = ctx.camera.pixelHeight,
+            msaaSamples = 1,
+            dimension = UnityEngine.Rendering.TextureDimension.Tex2D,
+            colorFormat = ctx.sourceFormat
+        };
+
+        var _HorizonalBlur = Shader.PropertyToID("_HorizonalBlur");
+        var _VerticalBlur = Shader.PropertyToID("_VerticalBlur");
+         
+          
+        // SSAO
         var viewToClip = ctx.camera.projectionMatrix;
         var viewToWorld = ctx.camera.cameraToWorldMatrix;
         var worldToView = ctx.camera.worldToCameraMatrix;
@@ -98,13 +117,38 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
         _material.SetMatrix("clipToView", viewToClip.inverse);
         _material.SetMatrix("viewToWorld", viewToWorld);
         _material.SetMatrix("worldToView", worldToView);
-        
-        _material.SetFloat("_Intensity", settings._Intensity.value);
-        _material.SetFloat("_Range", settings._Range.value);
-   
-        cmd.Blit(ctx.source, ctx.destination, _material);
-  
-        cmd.EndSample("Custom SSAO");
-          
+
+        _material.SetInt("_Samples", settings.Samples.value);
+        _material.SetFloat("_DropOffFactor", settings.DropOff.value);
+        _material.SetFloat("_Intensity", settings.Intensity.value);
+        _material.SetFloat("_Range", settings.Range.value);
+
+        if (settings.Blur.value)
+        { 
+            cmd.GetTemporaryRT(_HorizonalBlur, descriptor);
+            cmd.GetTemporaryRT(_VerticalBlur, descriptor);
+
+            cmd.Blit(ctx.source, _HorizonalBlur, _material, 0);
+         
+            // Horizontal Blur
+            _material.SetVector("BlurOffset_Flip", new Vector2(1.3333333f / ctx.camera.pixelWidth, 0));
+            cmd.SetGlobalTexture("_MainTex", _HorizonalBlur);
+            cmd.Blit(_HorizonalBlur, _VerticalBlur, _material, 1); 
+
+            cmd.ReleaseTemporaryRT(_HorizonalBlur);
+
+            // Vertical Blur
+            _material.SetVector("BlurOffset_Flip", new Vector2(0, 1.3333333f / ctx.camera.pixelHeight)); ;
+            cmd.SetGlobalTexture("_MainTex", _VerticalBlur);
+            cmd.Blit(_VerticalBlur, ctx.destination, _material, 2);
+
+            cmd.ReleaseTemporaryRT(_VerticalBlur);
+        }
+        else
+        {
+            cmd.Blit(ctx.source, ctx.destination, _material, 0);
+        }
+           
+        cmd.EndSample("Custom SSAO"); 
     }
 }
