@@ -21,8 +21,9 @@
 			Texture2D _MainTex; 
 			Texture2D _RandomTex; 
 
-			SamplerState sampler_linear_repeat; 
-
+			SamplerState sampler_linear_repeat;
+			SamplerState sampler_linear_clamp;
+			 
 			uniform float _Range;
 			uniform float _Intensity; 
 
@@ -76,13 +77,13 @@
 				const float far = _ProjectionParams.z;
 				const float isOrtho = unity_OrthoParams.w;
 
-				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, uv);
-				const float3 pixelColor = _MainTex.Sample(sampler_linear_clamp, uv);
+				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, i.uv);
+				const float3 pixelColor = _MainTex.Sample(sampler_linear_clamp, i.uv);
 				
 				if (pixelDepth == 0)
 					return pixelColor;
 
-				const float3 normal = (_CameraGBufferTexture2.Sample(sampler_linear_clamp, uv) - 0.5) * 2;
+				const float3 normal = (_CameraGBufferTexture2.Sample(sampler_linear_clamp, i.uv) - 0.5) * 2;
 				float3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
 				
 				float3 vertexPosPerspective = i.ray * Linear01Depth(pixelDepth);
