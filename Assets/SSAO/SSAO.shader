@@ -1,6 +1,4 @@
-﻿// Upgrade NOTE: replaced 'mul(UNITY_MATRIX_MVP,*)' with 'UnityObjectToClipPos(*)'
-
-Shader "Hidden/SSAO"
+﻿Shader "Hidden/SSAO"
 {
 	Properties
 	{
@@ -18,14 +16,12 @@ Shader "Hidden/SSAO"
 			 
 			#include "SSAO.cginc"  
 
-			sampler2D _CameraGBufferTexture2;
-			sampler2D _CameraDepthTexture;
-			sampler2D _MainTex;
+			Texture2D _CameraGBufferTexture2;
+			Texture2D _CameraDepthTexture;
+			Texture2D _MainTex; 
+			Texture2D _RandomTex; 
 
-			Texture2D _RandomTex;
-			Texture2D _OcclusionFunction;
-			SamplerState sampler_linear_repeat;
-			SamplerState sampler_linear_clamp;
+			SamplerState sampler_linear_repeat; 
 
 			uniform float _Range;
 			uniform float _Intensity; 
@@ -35,17 +31,17 @@ Shader "Hidden/SSAO"
 			uniform float4x4 worldToView;
 			uniform float4x4 viewToClip;
 			  
-			float2 ScreenToClip(float2 value) {
+			inline float2 ScreenToClip(float2 value) {
 				return (value * 2) - 1;
 			}
 
-			float2 ClipToScreen(float2 value) {
+			inline float2 ClipToScreen(float2 value) {
 				return (value + 1) * 0.5;
 			}
 			 
 			inline half occlusionFunction(half value) {
 				return pow(1 - value, 3);
-			}  
+			}
 
 			v2f vertexShader(appdata i) {
 				// Projection Settings
@@ -76,16 +72,19 @@ Shader "Hidden/SSAO"
 			} 
 
 			half3 fragmentShader(v2f i) : SV_Target {
-				float near = _ProjectionParams.y;
-				float far = _ProjectionParams.z;
-				float isOrtho = unity_OrthoParams.w;
-				  
-				const float pixelDepth = tex2D(_CameraDepthTexture, i.uv);
-				const float3 pixelColor = tex2D(_MainTex, i.uv);
+				const float near = _ProjectionParams.y;
+				const float far = _ProjectionParams.z;
+				const float isOrtho = unity_OrthoParams.w;
 
+				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, uv);
+				const float3 pixelColor = _MainTex.Sample(sampler_linear_clamp, uv);
+				
 				if (pixelDepth == 0)
 					return pixelColor;
 
+				const float3 normal = (_CameraGBufferTexture2.Sample(sampler_linear_clamp, uv) - 0.5) * 2;
+				float3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
+				
 				float3 vertexPosPerspective = i.ray * Linear01Depth(pixelDepth);
 				  
 				//float depthOrtho = lerp(near, far, pixelDepth);
@@ -95,13 +94,10 @@ Shader "Hidden/SSAO"
 				float3 pixelWS = mul(viewToWorld, float4(pixelVS, 1)).xyz;
 				 
 				// Prime the random
-				float3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
-				float3 normal = (tex2D(_CameraGBufferTexture2, i.uv) - 0.5) * 2; 
 
 				const int SAMPLE_COUNT = 128;
-				int SAMPLED_COUNT = 0;
-				float occlusion = 0;
-				 
+				float occlusionFactor = 0;
+				  
 				// How many samples to take per pixel
 				// Sample the surrounding pixels using the worldspace offset
 				for (int index = 0; index < SAMPLE_COUNT; index++) {
@@ -116,63 +112,32 @@ Shader "Hidden/SSAO"
 
 					// It is possible that since the pixelWS isn't true worldspace, that the _Range has no depth taken into account
 					// We need to properly convert the screen space pixel into worldspace to do this.
-					float3 sampleWS = pixelWS + random * _Range;  
+					const float4 sampleWS = float4(pixelWS + random * _Range, 1);  
 					//sampleWS.z = Linear01Depth(sampleWS.z);
 										
-					const float4 sampleVS = mul(worldToView, float4(sampleWS.xyz, 1)); 
+					const float4 sampleVS = mul(worldToView, sampleWS); 
 					const float4 sampleCS = mul(viewToClip, sampleVS);
 					const float2 sampleSS = ClipToScreen(sampleCS.xy / sampleCS.w);
 					 
 					// Sample the depth at this position
-					const float sampledDepth = -1 * far * Linear01Depth(tex2D(_CameraDepthTexture, sampleSS));
+					const float sampledDepth = -1 * far * Linear01Depth(_CameraDepthTexture.Sample(sampler_linear_repeat, sampleSS));
 
 					// Sample depth is in worldspace
 					// Sampled depth is in view space
-					float4 sampledVS = float4(sampleVS.xy, sampledDepth, 1);
-					float4 sampledWS = mul(viewToWorld, sampledVS / sampledVS.w); 
+					const float4 sampledVS = float4(sampleVS.xy, sampledDepth, 1);
+					const float4 sampledWS = mul(viewToWorld, sampledVS / sampledVS.w); 
 					    
 					// If the sampled depth is infront of the sample then it's occluded 
 					// Do the occlusion check in ViewSpace 
 					const bool isOccluded = sampledVS.z > sampleVS.z; 
-					const float sampleDepthDelta = length(sampledWS - sampleWS);
-					
-					//return sampleDepthDelta; 
-
-					// Has to be outside the if statement otherwise unity crashes
-					//float occluded = _OcclusionFunction.Sample(sampler_linear_clamp, float2(sampleDepthDelta, 0));
-
-					//float occluded = 1 - smoothstep(0, _Range, abs(sampleDepthDelta));
-
-					if (isOccluded) { 
-						occlusion += occlusionFunction(saturate(sampleDepthDelta));
-						SAMPLED_COUNT += 1.0f;
-					} 
-					/*
-
-					float depthWorldDelta = length(pixelWS - sampledWS) / _Range;
-					float depthOnlyDelta = (sampledDepth - pixelDepth) / _Range;
-
-					//occlusion += (_OcclusionFunction.Sample(sampler_linear_clamp, float2(depthWorldDelta, 0)));
-					//occlusion += (_OcclusionFunction.Sample(sampler_linear_clamp, float2(depthOnlyDelta, 0)));
-					//SAMPLED_COUNT += 1.0f;
-
-					// Attempt  2
-					// Sample the worldspace check if the sampled space is infront of the sampleWS then we have occlusion
-					//
-
-					float occluded = (_OcclusionFunction.Sample(sampler_linear_clamp, float2(depthOnlyDelta, 0)));
-
-					if (sampleWS.z < sampledDepth) {
-						occlusion += occluded;
-						SAMPLED_COUNT += 1.0f;
-					}*/
+					 
+					if (isOccluded) {
+						const float sampleDepthDelta = length(sampledWS - sampleWS);
+						occlusionFactor += occlusionFunction(saturate(sampleDepthDelta));
+					}
 				}
 
-				const bool isOccluded = SAMPLED_COUNT == 0;
-				const float finalOcclusion = 1 - ((isOccluded) ? 0 : (occlusion * _Intensity / SAMPLE_COUNT));
-				    
-				return finalOcclusion;
-
+				const float finalOcclusion = 1 - (occlusionFactor * _Intensity / SAMPLE_COUNT);
 				return pixelColor * finalOcclusion;
 			}
   
