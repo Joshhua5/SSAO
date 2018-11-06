@@ -1,14 +1,12 @@
 
 #include "UnityCG.cginc"  
 
-
-
-
 // Blur
 
 uniform float2 BlurOffset;
 
 Texture2D _MainTex;
+Texture2D _OcclusionTex;
 SamplerState sampler_linear_repeat;
 
 struct appdata
@@ -36,12 +34,18 @@ v2f vertV(appdata v) {
 	o.uv = float2(v.uv.x, 1 - v.uv.y);
 	return o;
 }
+ 
+half blur5(v2f i) : SV_Target{
+	half occlusion = _OcclusionTex.Sample(sampler_linear_repeat, i.uv) * 0.29411764705882354f;
+	occlusion += _OcclusionTex.Sample(sampler_linear_repeat, i.uv + BlurOffset.xy) * 0.35294117647058826f;
+	occlusion += _OcclusionTex.Sample(sampler_linear_repeat, i.uv - BlurOffset.xy) * 0.35294117647058826f;
+	return occlusion;
+}
 
-
-half4 blur5(v2f i) : SV_Target{ 
-	float4 color
-		   = _MainTex.Sample(sampler_linear_repeat, i.uv) * 0.29411764705882354f;
-	color += _MainTex.Sample(sampler_linear_repeat, i.uv + BlurOffset.xy) * 0.35294117647058826f;
-	color += _MainTex.Sample(sampler_linear_repeat, i.uv - BlurOffset.xy) * 0.35294117647058826f;
-	return color;
+half4 blur5Combine(v2f i) : SV_Target{
+	float4 color = _MainTex.Sample(sampler_linear_repeat, float2(i.uv.x, 1 - i.uv.y));
+	half occlusion = _OcclusionTex.Sample(sampler_linear_repeat, i.uv).r * 0.29411764705882354f; 
+	occlusion += _OcclusionTex.Sample(sampler_linear_repeat, i.uv + BlurOffset.xy).r * 0.35294117647058826f;
+	occlusion += _OcclusionTex.Sample(sampler_linear_repeat, i.uv - BlurOffset.xy).r * 0.35294117647058826f; 
+	return color * occlusion;
 }

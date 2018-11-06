@@ -34,16 +34,13 @@ MonoBehaviour:
     value: 0.25
   Intensity:
     overrideState: 1
-    value: 1.01
+    value: 1
   Samples:
-    overrideState: 0
+    overrideState: 1
     value: 32
   DropOff:
     overrideState: 0
     value: 3
-  Blur:
-    overrideState: 1
-    value: 1
 --- !u!114 &114882800372297530
 MonoBehaviour:
   m_ObjectHideFlags: 3
@@ -64,7 +61,7 @@ MonoBehaviour:
     value: 0
   intensity:
     overrideState: 1
-    value: 4
+    value: 1
   color:
     overrideState: 0
     value: {r: 0, g: 0, b: 0, a: 1}

@@ -18,9 +18,7 @@ public sealed class SSAO_PostProcessing : PostProcessEffectSettings
     public IntParameter Samples = new IntParameter { value = 32 };
 
     [Range(1, 10)]
-    public IntParameter DropOff = new IntParameter { value = 3 };
-
-    public BoolParameter Blur = new BoolParameter { value = true };
+    public IntParameter DropOff = new IntParameter { value = 3 }; 
 }
 
 [ExecuteInEditMode]
@@ -29,11 +27,35 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 
     private static readonly int DownRenderTargetID = Shader.PropertyToID("LBAO_Downsample");
     private static readonly int BlurRenderTargetID = Shader.PropertyToID("LBAO_Blur");
- 
+
+    private static readonly int _RandomTex = Shader.PropertyToID("_RandomTex");
+    private static readonly int _OcclusionFunction = Shader.PropertyToID("_OcclusionFunction");
+    private static readonly int _ViewToClip = Shader.PropertyToID("viewToClip");
+    private static readonly int _ClipToView = Shader.PropertyToID("clipToView");
+    private static readonly int _ViewToWorld = Shader.PropertyToID("viewToWorld");
+    private static readonly int _WorldToView = Shader.PropertyToID("worldToView");
+    private static readonly int _Samples = Shader.PropertyToID("_Samples");
+    private static readonly int _DropOffFactor = Shader.PropertyToID("_DropOffFactor");
+    private static readonly int _Intensity = Shader.PropertyToID("_Intensity");
+    private static readonly int _Range = Shader.PropertyToID("_Range");
+
+    private static readonly int _BlurOffset = Shader.PropertyToID("_BlurOffset");
+    private static readonly int _OcclusionTex = Shader.PropertyToID("_OcclusionTex");
+    private static readonly int _Blur = Shader.PropertyToID("_Blur");
+    private static readonly int _Occlusion = Shader.PropertyToID("_Occlusion");
+    private static readonly int _MainTex = Shader.PropertyToID("_MainTex");
+
     private Material _material;
     private Texture2D _randomTexture;
     private Texture2D _occlusionFunction;
-      
+
+    static RenderTextureDescriptor occlusionDescriptor = new RenderTextureDescriptor
+    { 
+        msaaSamples = 1,
+        dimension = UnityEngine.Rendering.TextureDimension.Tex2D,
+        colorFormat = RenderTextureFormat.RHalf
+    };
+     
     public override void Init()
     {
         var shader = Shader.Find("Hidden/SSAO");
@@ -72,13 +94,20 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
             _occlusionFunction.SetPixel(1 + x, 0, new Color(1f - (x / 31f), 0, 0));
         }
         _occlusionFunction.Apply();
-
+        
         UpdateMaterialProperties();
         base.Init();
     } 
 
     public void UpdateMaterialProperties()
-    { 
+    {
+        _material.SetInt(_Samples, settings.Samples.value);
+        _material.SetFloat(_DropOffFactor, settings.DropOff.value);
+        _material.SetFloat(_Intensity, settings.Intensity.value);
+        _material.SetFloat(_Range, settings.Range.value);
+         
+        _material.SetTexture(_RandomTex, _randomTexture);
+        _material.SetTexture(_OcclusionFunction, _occlusionFunction);
     }
 
     public override void Release()
@@ -88,67 +117,50 @@ public class SSAO_Renderer : PostProcessEffectRenderer<SSAO_PostProcessing>
 
     public override void Render(PostProcessRenderContext ctx)
     {
-        var cmd = ctx.command;  
+        UpdateMaterialProperties();
 
-        cmd.BeginSample("Custom SSAO"); 
-  
-        var descriptor = new RenderTextureDescriptor
-        {
-            width = ctx.camera.pixelWidth,
-            height = ctx.camera.pixelHeight,
-            msaaSamples = 1,
-            dimension = UnityEngine.Rendering.TextureDimension.Tex2D,
-            colorFormat = ctx.sourceFormat
-        };
+        var cmd = ctx.command;
 
-        var _HorizonalBlur = Shader.PropertyToID("_HorizonalBlur");
-        var _VerticalBlur = Shader.PropertyToID("_VerticalBlur");
-         
-          
+        cmd.BeginSample("Custom SSAO");
+        
         // SSAO
         var viewToClip = ctx.camera.projectionMatrix;
         var viewToWorld = ctx.camera.cameraToWorldMatrix;
         var worldToView = ctx.camera.worldToCameraMatrix;
-
-        _material.SetTexture("_RandomTex", _randomTexture);
-        _material.SetTexture("_OcclusionFunction", _occlusionFunction);
          
-        _material.SetMatrix("viewToClip", viewToClip);
-        _material.SetMatrix("clipToView", viewToClip.inverse);
-        _material.SetMatrix("viewToWorld", viewToWorld);
-        _material.SetMatrix("worldToView", worldToView);
+        _material.SetMatrix(_ViewToClip, viewToClip);
+        _material.SetMatrix(_ClipToView, viewToClip.inverse);
+        _material.SetMatrix(_ViewToWorld, viewToWorld);
+        _material.SetMatrix(_WorldToView, worldToView);
+        
+        occlusionDescriptor.width = ctx.screenWidth;
+        occlusionDescriptor.height = ctx.screenHeight;
 
-        _material.SetInt("_Samples", settings.Samples.value);
-        _material.SetFloat("_DropOffFactor", settings.DropOff.value);
-        _material.SetFloat("_Intensity", settings.Intensity.value);
-        _material.SetFloat("_Range", settings.Range.value);
+        cmd.GetTemporaryRT(_Occlusion, occlusionDescriptor);
+        cmd.GetTemporaryRT(_Blur, occlusionDescriptor);
 
-        if (settings.Blur.value)
-        { 
-            cmd.GetTemporaryRT(_HorizonalBlur, descriptor);
-            cmd.GetTemporaryRT(_VerticalBlur, descriptor);
+        // Occlusion
+        cmd.BeginSample("Occlusion");
+        cmd.Blit(ctx.source, _Occlusion, _material, 0);
+        cmd.EndSample("Occlusion");
 
-            cmd.Blit(ctx.source, _HorizonalBlur, _material, 0);
-         
-            // Horizontal Blur
-            _material.SetVector("BlurOffset_Flip", new Vector2(1.3333333f / ctx.camera.pixelWidth, 0));
-            cmd.SetGlobalTexture("_MainTex", _HorizonalBlur);
-            cmd.Blit(_HorizonalBlur, _VerticalBlur, _material, 1); 
+        cmd.BeginSample("Blur");
+        // Horizontal Blur
+        _material.SetVector(_BlurOffset, new Vector2(1.3333333f / ctx.camera.pixelWidth, 0));
+        cmd.SetGlobalTexture(_OcclusionTex, _Occlusion);
+        cmd.Blit(_Occlusion, _Blur, _material, 1);
+          
+        cmd.ReleaseTemporaryRT(_Occlusion); 
+        // Vertical Blur
+        _material.SetVector(_BlurOffset, new Vector2(0, 1.3333333f / ctx.camera.pixelHeight)); ;
+        cmd.SetGlobalTexture(_MainTex, ctx.source);
+        cmd.SetGlobalTexture(_OcclusionTex, _Blur);
+        cmd.Blit(ctx.source, ctx.destination, _material, 2);
 
-            cmd.ReleaseTemporaryRT(_HorizonalBlur);
+        cmd.ReleaseTemporaryRT(_Blur);
+        cmd.EndSample("Blur");
 
-            // Vertical Blur
-            _material.SetVector("BlurOffset_Flip", new Vector2(0, 1.3333333f / ctx.camera.pixelHeight)); ;
-            cmd.SetGlobalTexture("_MainTex", _VerticalBlur);
-            cmd.Blit(_VerticalBlur, ctx.destination, _material, 2);
 
-            cmd.ReleaseTemporaryRT(_VerticalBlur);
-        }
-        else
-        {
-            cmd.Blit(ctx.source, ctx.destination, _material, 0);
-        }
-           
         cmd.EndSample("Custom SSAO"); 
     }
 }

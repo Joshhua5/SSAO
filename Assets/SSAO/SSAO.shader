@@ -87,16 +87,15 @@
 				return o;
 			}
 
-			half3 fragmentShader(v2f i) : SV_Target {
+			half fragmentShader(v2f i) : SV_Target {
 				const float near = _ProjectionParams.y;
 				const float far = _ProjectionParams.z;
 				const float isOrtho = unity_OrthoParams.w;
 
-				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, i.uv);
-				const float3 pixelColor = _MainTex.Sample(sampler_linear_clamp, i.uv);
+				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, i.uv); 
 
 				if (pixelDepth == 0)
-					return pixelColor;
+					return half3(1, 1, 1);
 
 				const float3 normal = (_CameraGBufferTexture2.Sample(sampler_linear_clamp, i.uv) - 0.5) * 2;
 				float3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
@@ -152,8 +151,7 @@
 					}
 				}
 
-				const float finalOcclusion = 1 - (occlusionFactor * _Intensity / clampedSamples);
-				return pixelColor * finalOcclusion;
+				return 1 - (occlusionFactor * _Intensity / clampedSamples); 
 			}
 
 			ENDCG
@@ -178,7 +176,7 @@
 
 			CGPROGRAM
 			#pragma vertex vertV
-			#pragma fragment blur5
+			#pragma fragment blur5Combine
 
 			#include "SSAO.cginc" 
  
