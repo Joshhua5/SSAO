@@ -31,7 +31,7 @@ MonoBehaviour:
     value: 1
   Range:
     overrideState: 1
-    value: 0.24
+    value: 0.25
   Intensity:
     overrideState: 1
     value: 1
@@ -39,8 +39,11 @@ MonoBehaviour:
     overrideState: 1
     value: 32
   DropOff:
-    overrideState: 0
-    value: 3
+    overrideState: 1
+    value: 1
+  OcclusionOnly:
+    overrideState: 1
+    value: 1
 --- !u!114 &114882800372297530
 MonoBehaviour:
   m_ObjectHideFlags: 3

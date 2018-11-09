@@ -12,9 +12,10 @@
 			// No culling or depth
 			Cull Off ZWrite Off ZTest Always
 
-			CGPROGRAM
+			CGPROGRAM 
+
 			#pragma vertex vertexShader
-			#pragma fragment fragmentShader
+			#pragma fragment occlusionShader
 
 			#include "UnityCG.cginc"  
 
@@ -37,10 +38,12 @@
 			SamplerState sampler_linear_repeat;
 			SamplerState sampler_linear_clamp;
 
-			uniform int _Samples;
+			uniform uint _Samples;
 			uniform float _Range;
 			uniform float _Intensity;
 			uniform float _DropOffFactor;
+
+			uniform half3 _RandomSamples[32];
 
 			uniform float4x4 clipToView;
 			uniform float4x4 viewToWorld;
@@ -93,71 +96,80 @@
 				return o;
 			}
 
-			half fragmentShader(v2f i) : SV_Target {
+			half3 occlusionShader(v2f i) : SV_Target {
 				const float near = _ProjectionParams.y;
 				const float far = _ProjectionParams.z;
 				const float isOrtho = unity_OrthoParams.w;
 
-				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, i.uv); 
+				const float pixelDepth = _CameraDepthTexture.Sample(sampler_linear_clamp, i.uv).r; 
 
 				if (pixelDepth == 0)
 					return half3(1, 1, 1);
 
-				const float3 normal = _CameraGBufferTexture2.Sample(sampler_linear_clamp, i.uv) * 2 - 1;
-				float3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
-
-				float3 vertexPosPerspective = i.ray * sm5Linear01Depth(pixelDepth);
-
+				const half3 normal = _CameraGBufferTexture2.Sample(sampler_linear_clamp, i.uv).xyz * 2 - 1;
+				half3 random = _RandomTex.Sample(sampler_linear_repeat, i.uv);
+					  random = _RandomTex.Sample(sampler_linear_repeat, i.uv + random);
+				  
 				//float depthOrtho = lerp(near, far, pixelDepth);
 				//float3 vertexPosOrtho = float3(i.ray.xy, depthOrtho);
 
-				float4 pixelVS = float4(vertexPosPerspective, 1);// lerp(vertexPosPerspective, vertexPosOrtho, isOrtho);
-				float3 pixelWS = mul(viewToWorld, pixelVS).xyz;
+				// Pixel_ViewSpace = i.ray * sm5Linear01Depth(pixelDepth)
+				// Pixel_WorldSpace = mul(viewToWorld, Pixel_ViewSpace)
+				float3 pixelWS = mul(viewToWorld, float4(i.ray * sm5Linear01Depth(pixelDepth), 1)).xyz;
 
 				// Prime the random  
 				float occlusionFactor = 0;
 
 				// How many samples to take per pixel
-				// Sample the surrounding pixels using the worldspace offset
-				int clampedSamples = clamp(1, 256, _Samples);
-				//[loop]
-				for (int index = 0; index < clampedSamples; index++) {
-					random = _RandomTex.Sample(sampler_linear_repeat, i.uv + random);
+				// Sample the surrounding pixels using the worldspace offset 
 
-					// This random vector needs to prevent the self occlusion
-					// we handle this by dot producting with the normal and inverting if occluded
-					if (dot(normal, random) < 0)
-						random *= float3(-1, -1, -1);
+				// SampleSetSize is set to a value that allows for the most Wavefronts to hide latency
+				// while also allowing loop unrolling
+				const uint SampleSetSize = 3;
+				const uint SampleSetCount = _Samples / SampleSetSize;
+				  
+				[loop]
+				for (uint sampleSet = 0; sampleSet < SampleSetCount; sampleSet++) {
+					[unroll(SampleSetSize)]
+					for (uint index = 0; index < SampleSetSize; index++) {
+						// Working on removing the texture sample for a random, this method allows us to use a 16x16 texture for the random sample.
+						// Although it's still a Texture request, per sample, per pixel
+						random = _RandomTex.Sample(sampler_linear_repeat, i.uv + random).xyz;	
+						//random = cross(random, _RandomSamples[(sampleSet * SampleSetSize) + index].xyz);
+						//random = (random + _RandomSamples[sampleSet * SampleSetSize + index]) * 0.5;
 
-					// Convert World space back to Screen Space 
+						// This random vector needs to prevent the self occlusion
+						// we handle this by dot producting with the normal and inverting if occluded
+						if (dot(normal, random) < 0)
+							random = -random;
 
-					// It is possible that since the pixelWS isn't true worldspace, that the _Range has no depth taken into account
-					// We need to properly convert the screen space pixel into worldspace to do this.
-					const float4 sampleWS = float4(pixelWS + random * _Range, 1);
-					//sampleWS.z = Linear01Depth(sampleWS.z);
+						// Convert World space back to Screen Space 
 
-					const float4 sampleVS = mul(worldToView, sampleWS);
-					const float4 sampleCS = mul(viewToClip, sampleVS);
-					const float2 sampleSS = ClipToScreen(sampleCS.xy / sampleCS.w);
+						// It is possible that since the pixelWS isn't true worldspace, that the _Range has no depth taken into account
+						// We need to properly convert the screen space pixel into worldspace to do this.
+						const float4 sampleWS = float4(random * _Range + pixelWS, 1);
 
-					// Sample the depth at this position
-					const float sampledDepth = -(far * sm5Linear01Depth(_CameraDepthTexture.Sample(sampler_linear_repeat, sampleSS)));
+						const float4 sampleVS = mul(worldToView, sampleWS);
+						const float4 sampleCS = mul(viewToClip, sampleVS);
+						const float2 sampleSS = ClipToScreen(sampleCS.xy / sampleCS.w);
 
-					// Sample depth is in worldspace
-					// Sampled depth is in view space
-					const float4 sampledVS = float4(sampleVS.xy, sampledDepth, 1);
-					const float4 sampledWS = mul(viewToWorld, sampledVS);
+						// Sample the depth at this position
+						const float sampledDepth = -far * sm5Linear01Depth(_CameraDepthTexture.Sample(sampler_linear_repeat, sampleSS));
 
-					// If the sampled depth is infront of the sample then it's occluded 
-					// Do the occlusion check in ViewSpace 
-					const bool isOccluded = sampledVS.z > sampleVS.z; 
-					if (isOccluded) {
-						const float sampleDepthDelta = length(sampledWS - sampleWS);
-						occlusionFactor += occlusionFunction(saturate(sampleDepthDelta));
+						// Sample depth is in worldspace
+						// Sampled depth is in view space
+						// const float3 sampledVS = float4(sampleVS.xy, sampledDepth, 1);
+						const float4 sampledWS = mul(viewToWorld, float4(sampleVS.xy, sampledDepth, 1));
+
+						// If the sampled depth is infront of the sample then it's occluded 
+						// Do the occlusion check in ViewSpace 
+						if (sampledDepth > sampleVS.z) {
+							occlusionFactor += occlusionFunction(saturate(length(sampledWS - sampleWS)));
+						}
 					}
 				}
 
-				return 1 - (occlusionFactor * _Intensity / clampedSamples); 
+				return 1 - (occlusionFactor * _Intensity / _Samples);
 			}
 
 			ENDCG
